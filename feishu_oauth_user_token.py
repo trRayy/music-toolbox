@@ -178,6 +178,27 @@ def exchange_user_access_token(tenant_access_token: str, code: str, redirect_uri
     return response
 
 
+def refresh_user_access_token(tenant_access_token: str, refresh_token: str) -> dict:
+    """Refresh the user_access_token with a refresh_token."""
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    headers = {"Authorization": f"Bearer {tenant_access_token}"}
+    response = http_post_json(USER_ACCESS_TOKEN_URL, payload, headers=headers)
+
+    if response.get("code") != 0:
+        raise OAuthError(f"refresh access_token request failed: {json.dumps(response, ensure_ascii=False)}")
+
+    data = response.get("data") or {}
+    user_access_token = data.get("access_token") or data.get("user_access_token")
+    next_refresh_token = data.get("refresh_token")
+    if not user_access_token or not next_refresh_token:
+        raise OAuthError(f"access_token or refresh_token missing in response: {json.dumps(response, ensure_ascii=False)}")
+
+    return response
+
+
 def print_result(response: dict) -> None:
     """Print the token result."""
     data = response.get("data") or {}

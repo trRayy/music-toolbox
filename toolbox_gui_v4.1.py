@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import json
+import re
 import subprocess
 import sys
 import threading
@@ -14,6 +16,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 import mysql_table_to_feishu_sheet as feishu_sheet_import
+import feishu_oauth_user_token as feishu_oauth
 
 # ========= 导入模块 =========
 def optional_import(module_name: str):
@@ -70,6 +73,10 @@ WANGYIYUN_TEST_TABLE = getattr(wangyiyun_comment, "DEFAULT_TEST_TABLE", "t_comme
 FEISHU_TOKEN_ENV = "FEISHU_USER_ACCESS_TOKEN"
 FEISHU_DEFAULT_SHEET_URL = "https://gx1mlm3tj1l.feishu.cn/sheets/GdpOsM9orhCph3tbWFicv1YJn1g"
 FEISHU_DEFAULT_WORKSHEET_ID = "db7efd"
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+FEISHU_TOKEN_CACHE_FILE = os.path.join(APP_DIR, "feishu_token_cache.json")
+FEISHU_OAUTH_SETTINGS_FILE = os.path.join(APP_DIR, "start_feishu_oauth.ps1")
+FEISHU_OAUTH_ENV_KEYS = ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_REDIRECT_URI")
 
 
 # ========= 通用小工具 =========
@@ -657,8 +664,10 @@ class ExportMySQLToFeishuTab(ttk.Frame):
         btns.grid(row=5, column=0, columnspan=5, sticky="w", pady=(12, 0))
 
         ttk.Button(btns, text="从环境读取Token", command=self.load_token_from_env).pack(side="left")
+        self.refresh_token_btn = ttk.Button(btns, text="自动获取/刷新Token", command=self.start_refresh_token)
+        self.refresh_token_btn.pack(side="left", padx=8)
         self.inspect_btn = ttk.Button(btns, text="读取工作表", command=self.start_inspect)
-        self.inspect_btn.pack(side="left", padx=8)
+        self.inspect_btn.pack(side="left")
         ttk.Button(btns, text="打开飞书表格", command=self.open_sheet_url).pack(side="left")
         self.run_btn = ttk.Button(btns, text="导入到飞书表格", command=self.start_export)
         self.run_btn.pack(side="left", padx=8)
@@ -673,6 +682,7 @@ class ExportMySQLToFeishuTab(ttk.Frame):
         self.log.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
         self.q = queue.Queue()
+        self.prefill_token_from_sources()
         self.load_tables()
         self.after(100, self.flush_log)
 
@@ -689,6 +699,224 @@ class ExportMySQLToFeishuTab(ttk.Frame):
         state = "disabled" if busy else "normal"
         self.after(0, lambda: self.run_btn.config(state=state))
         self.after(0, lambda: self.inspect_btn.config(state=state))
+        self.after(0, lambda: self.refresh_token_btn.config(state=state))
+
+    def set_token_value(self, token: str):
+        self.after(0, lambda: self.token_var.set(token))
+
+    def read_token_cache(self) -> dict:
+        if not os.path.exists(FEISHU_TOKEN_CACHE_FILE):
+            return {}
+        try:
+            with open(FEISHU_TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            self.q.put(f"读取飞书 token 缓存失败：{e}")
+            return {}
+
+    def write_token_cache(self, response: dict, source: str) -> str:
+        data = response.get("data") or {}
+        access_token = (data.get("access_token") or data.get("user_access_token") or "").strip()
+        refresh_token = (data.get("refresh_token") or "").strip()
+        if not access_token:
+            raise ValueError("飞书返回里没有 user_access_token")
+
+        cache_data = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": data.get("expires_in"),
+            "refresh_expires_in": data.get("refresh_expires_in"),
+            "name": data.get("name"),
+            "tenant_key": data.get("tenant_key"),
+            "updated_at": datetime.now(tz_cn()).strftime("%Y-%m-%d %H:%M:%S"),
+            "source": source,
+        }
+        with open(FEISHU_TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+        os.environ[FEISHU_TOKEN_ENV] = access_token
+        self.set_token_value(access_token)
+        self.q.put(f"已通过 {source} 获取最新 user_access_token，并写入 {os.path.basename(FEISHU_TOKEN_CACHE_FILE)}")
+        return access_token
+
+    def prefill_token_from_sources(self):
+        token = os.getenv(FEISHU_TOKEN_ENV, "").strip()
+        if token:
+            self.token_var.set(token)
+            self.q.put(f"已从环境变量 {FEISHU_TOKEN_ENV} 预加载 token，长度={len(token)}")
+            return
+
+        cache = self.read_token_cache()
+        cached_token = str(cache.get("access_token") or "").strip()
+        if cached_token:
+            self.token_var.set(cached_token)
+            os.environ[FEISHU_TOKEN_ENV] = cached_token
+            source = cache.get("source") or "本地缓存"
+            self.q.put(f"环境变量为空，已从{source}预加载 token，长度={len(cached_token)}")
+
+    def read_oauth_settings_from_script(self) -> dict:
+        if not os.path.exists(FEISHU_OAUTH_SETTINGS_FILE):
+            return {}
+
+        with open(FEISHU_OAUTH_SETTINGS_FILE, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        settings = {}
+        for key in FEISHU_OAUTH_ENV_KEYS:
+            match = re.search(rf'\$env:{key}\s*=\s*"([^"]+)"', content)
+            if match:
+                settings[key] = match.group(1).strip()
+        return settings
+
+    def get_oauth_settings(self) -> dict:
+        settings = {key: os.getenv(key, "").strip() for key in FEISHU_OAUTH_ENV_KEYS}
+        if all(settings.values()):
+            return settings
+
+        script_settings = self.read_oauth_settings_from_script()
+        for key in FEISHU_OAUTH_ENV_KEYS:
+            if not settings[key]:
+                settings[key] = script_settings.get(key, "").strip()
+
+        missing = [key for key, value in settings.items() if not value]
+        if missing:
+            raise ValueError(
+                "缺少飞书 OAuth 配置："
+                + ", ".join(missing)
+                + "。请先设置环境变量，或补全 start_feishu_oauth.ps1。"
+            )
+        return settings
+
+    def get_manual_or_cached_token(self) -> str:
+        manual_token = self.token_var.get().strip()
+        if manual_token:
+            return manual_token
+
+        env_token = os.getenv(FEISHU_TOKEN_ENV, "").strip()
+        if env_token:
+            self.set_token_value(env_token)
+            return env_token
+
+        cache = self.read_token_cache()
+        cached_token = str(cache.get("access_token") or "").strip()
+        if cached_token:
+            os.environ[FEISHU_TOKEN_ENV] = cached_token
+            self.set_token_value(cached_token)
+            return cached_token
+        return ""
+
+    def refresh_token_from_cache(self) -> str:
+        cache = self.read_token_cache()
+        refresh_token = str(cache.get("refresh_token") or "").strip()
+        if not refresh_token:
+            raise ValueError("本地没有可用的 refresh_token，请先完成一次飞书授权。")
+
+        settings = self.get_oauth_settings()
+        self.q.put("检测到本地 refresh_token，正在刷新飞书 user_access_token ...")
+        tenant_access_token = feishu_oauth.get_tenant_access_token(
+            settings["FEISHU_APP_ID"], settings["FEISHU_APP_SECRET"]
+        )
+        response = feishu_oauth.refresh_user_access_token(tenant_access_token, refresh_token)
+        return self.write_token_cache(response, "refresh_token")
+
+    def start_interactive_oauth(self) -> str:
+        settings = self.get_oauth_settings()
+        redirect_uri = settings["FEISHU_REDIRECT_URI"]
+        feishu_oauth.validate_redirect_uri(redirect_uri)
+
+        self.q.put("正在请求 tenant_access_token ...")
+        tenant_access_token = feishu_oauth.get_tenant_access_token(
+            settings["FEISHU_APP_ID"], settings["FEISHU_APP_SECRET"]
+        )
+        self.q.put("tenant_access_token 获取成功，准备打开飞书授权页面。")
+
+        server, thread, event, callback_result = feishu_oauth.start_callback_server()
+        state = feishu_oauth.secrets.token_urlsafe(24)
+        authorize_url = feishu_oauth.build_authorize_url(settings["FEISHU_APP_ID"], redirect_uri, state)
+        try:
+            opened = webbrowser.open(authorize_url)
+            if opened:
+                self.q.put("已打开浏览器，请在飞书页面完成授权。")
+            else:
+                self.q.put("请手动打开下面的飞书授权链接：")
+                self.q.put(authorize_url)
+
+            if not event.wait(feishu_oauth.CALLBACK_TIMEOUT_SECONDS):
+                raise TimeoutError(
+                    f"等待飞书回调超时：{feishu_oauth.CALLBACK_TIMEOUT_SECONDS} 秒。"
+                )
+
+            if callback_result["error"]:
+                raise ValueError(
+                    f"飞书授权失败：{callback_result['error']} {callback_result['error_description'] or ''}".strip()
+                )
+
+            code = callback_result["code"]
+            if not code:
+                raise ValueError("飞书回调里没有 code。")
+            if callback_result["state"] != state:
+                raise ValueError("飞书回调 state 校验失败。")
+
+            self.q.put("授权成功，正在换取最新 user_access_token ...")
+            response = feishu_oauth.exchange_user_access_token(tenant_access_token, code, redirect_uri)
+            return self.write_token_cache(response, "interactive_oauth")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def ensure_feishu_token(self, force_refresh: bool = False, allow_interactive: bool = True) -> str:
+        if not force_refresh:
+            token = self.get_manual_or_cached_token()
+            if token:
+                return token
+
+        cache = self.read_token_cache()
+        if cache.get("refresh_token"):
+            try:
+                return self.refresh_token_from_cache()
+            except Exception as e:
+                self.q.put(f"refresh_token 刷新失败：{e}")
+
+        if allow_interactive:
+            return self.start_interactive_oauth()
+
+        raise ValueError(
+            "当前没有可用的飞书 user_access_token，也无法自动刷新。"
+            "请点击“自动获取/刷新Token”完成授权。"
+        )
+
+    def is_token_expired_error(self, exc: Exception) -> bool:
+        message = str(exc)
+        return "99991677" in message or "Authentication token expired" in message
+
+    def with_feishu_token_retry(self, worker):
+        token = self.ensure_feishu_token()
+        try:
+            return worker(token)
+        except Exception as e:
+            if not self.is_token_expired_error(e):
+                raise
+            self.q.put("检测到飞书 token 已过期，正在自动刷新后重试 ...")
+            token = self.ensure_feishu_token(force_refresh=True, allow_interactive=True)
+            return worker(token)
+
+    def start_refresh_token(self):
+        self.set_busy(True)
+        self.q.put("开始自动获取/刷新飞书 user_access_token ...")
+        th = threading.Thread(target=self._refresh_token_worker, daemon=True)
+        th.start()
+
+    def _refresh_token_worker(self):
+        try:
+            token = self.ensure_feishu_token(force_refresh=True, allow_interactive=True)
+            self.q.put(f"飞书 token 已就绪，长度={len(token)}")
+        except Exception as e:
+            self.q.put("自动获取飞书 token 失败：" + str(e))
+            self.q.put(traceback.format_exc())
+        finally:
+            self.set_busy(False)
 
     def load_tables(self):
         try:
@@ -706,11 +934,20 @@ class ExportMySQLToFeishuTab(ttk.Frame):
 
     def load_token_from_env(self):
         token = os.getenv(FEISHU_TOKEN_ENV, "").strip()
-        self.token_var.set(token)
         if token:
+            self.token_var.set(token)
             self.q.put(f"已从环境变量 {FEISHU_TOKEN_ENV} 读取 token，长度={len(token)}")
         else:
-            self.q.put(f"环境变量 {FEISHU_TOKEN_ENV} 为空，请手动粘贴 user_access_token")
+            cached_token = self.get_manual_or_cached_token()
+            if cached_token:
+                self.q.put(
+                    f"环境变量 {FEISHU_TOKEN_ENV} 为空，已改为读取本地缓存 token，长度={len(cached_token)}"
+                )
+            else:
+                self.q.put(
+                    f"环境变量 {FEISHU_TOKEN_ENV} 为空，本地也没有 token 缓存。"
+                    "请点击“自动获取/刷新Token”。"
+                )
 
     def open_sheet_url(self):
         sheet_url = self.sheet_url_var.get().strip()
@@ -723,15 +960,14 @@ class ExportMySQLToFeishuTab(ttk.Frame):
             messagebox.showerror("打开失败", str(e))
 
     def get_token(self) -> str:
-        token = self.token_var.get().strip() or os.getenv(FEISHU_TOKEN_ENV, "").strip()
+        token = self.get_manual_or_cached_token()
         if not token:
-            raise ValueError("请先填写 user_access_token，或设置环境变量 FEISHU_USER_ACCESS_TOKEN")
+            raise ValueError("请先填写 user_access_token，或点击“自动获取/刷新Token”。")
         return token
 
     def start_inspect(self):
         try:
             sheet_url = self.sheet_url_var.get().strip()
-            token = self.get_token()
             spreadsheet_token = feishu_sheet_import.extract_spreadsheet_token(sheet_url)
         except Exception as e:
             messagebox.showwarning("提示", str(e))
@@ -739,22 +975,25 @@ class ExportMySQLToFeishuTab(ttk.Frame):
 
         self.set_busy(True)
         self.q.put(f"开始读取飞书工作表列表：{spreadsheet_token}")
-        th = threading.Thread(target=self._inspect_worker, args=(spreadsheet_token, token), daemon=True)
+        th = threading.Thread(target=self._inspect_worker, args=(spreadsheet_token,), daemon=True)
         th.start()
 
-    def _inspect_worker(self, spreadsheet_token: str, token: str):
+    def _inspect_worker(self, spreadsheet_token: str):
         try:
-            sheets = feishu_sheet_import.get_sheets(spreadsheet_token, token)
-            self.q.put(f"工作表数量：{len(sheets)}")
-            for sheet in sheets:
-                grid = sheet.get("grid_properties") or {}
-                self.q.put(
-                    f"- {sheet.get('title')} | sheet_id={sheet.get('sheet_id')} | "
-                    f"{grid.get('row_count')}行 x {grid.get('column_count')}列"
-                )
-            if sheets and not self.worksheet_id_var.get().strip():
-                first_sheet_id = str(sheets[0].get("sheet_id") or "")
-                self.after(0, lambda: self.worksheet_id_var.set(first_sheet_id))
+            def run(token: str):
+                sheets = feishu_sheet_import.get_sheets(spreadsheet_token, token)
+                self.q.put(f"工作表数量：{len(sheets)}")
+                for sheet in sheets:
+                    grid = sheet.get("grid_properties") or {}
+                    self.q.put(
+                        f"- {sheet.get('title')} | sheet_id={sheet.get('sheet_id')} | "
+                        f"{grid.get('row_count')}行 x {grid.get('column_count')}列"
+                    )
+                if sheets and not self.worksheet_id_var.get().strip():
+                    first_sheet_id = str(sheets[0].get("sheet_id") or "")
+                    self.after(0, lambda: self.worksheet_id_var.set(first_sheet_id))
+
+            self.with_feishu_token_retry(run)
         except Exception as e:
             self.q.put("读取工作表失败：" + str(e))
             self.q.put(traceback.format_exc())
@@ -768,7 +1007,6 @@ class ExportMySQLToFeishuTab(ttk.Frame):
             return
 
         try:
-            token = self.get_token()
             fetch_size = int(self.fetch_size_var.get().strip())
             feishu_sheet_import.require_positive(fetch_size, "fetch_size")
             spreadsheet_token = feishu_sheet_import.extract_spreadsheet_token(self.sheet_url_var.get().strip())
@@ -789,7 +1027,7 @@ class ExportMySQLToFeishuTab(ttk.Frame):
         )
         th = threading.Thread(
             target=self._export_worker,
-            args=(table_name, spreadsheet_token, worksheet_id, worksheet_title, start_cell, fetch_size, token),
+            args=(table_name, spreadsheet_token, worksheet_id, worksheet_title, start_cell, fetch_size),
             daemon=True,
         )
         th.start()
@@ -802,7 +1040,6 @@ class ExportMySQLToFeishuTab(ttk.Frame):
         worksheet_title: str,
         start_cell: str,
         fetch_size: int,
-        token: str,
     ):
         try:
             table_name = feishu_sheet_import.validate_table_name(table_name)
@@ -813,44 +1050,47 @@ class ExportMySQLToFeishuTab(ttk.Frame):
             columns, row_count = feishu_sheet_import.get_table_columns_and_count(mysql_config, table_name)
             self.q.put(f"MySQL 表信息：{len(columns)} 列，{row_count} 行")
 
-            sheets = feishu_sheet_import.get_sheets(spreadsheet_token, token)
-            target_sheet = feishu_sheet_import.choose_sheet(sheets, worksheet_id, worksheet_title)
-            sheet_id = str(target_sheet.get("sheet_id") or "")
-            sheet_title = str(target_sheet.get("title") or "")
-            feishu_sheet_import.ensure_sheet_capacity(
-                target_sheet, start_row, start_col, row_count + 1, len(columns)
-            )
-            self.q.put(f"目标工作表：{sheet_title} ({sheet_id})")
+            def run(token: str):
+                sheets = feishu_sheet_import.get_sheets(spreadsheet_token, token)
+                target_sheet = feishu_sheet_import.choose_sheet(sheets, worksheet_id, worksheet_title)
+                sheet_id = str(target_sheet.get("sheet_id") or "")
+                sheet_title = str(target_sheet.get("title") or "")
+                feishu_sheet_import.ensure_sheet_capacity(
+                    target_sheet, start_row, start_col, row_count + 1, len(columns)
+                )
+                self.q.put(f"目标工作表：{sheet_title} ({sheet_id})")
 
-            self.q.put("写入表头...")
-            feishu_sheet_import.write_values(
-                spreadsheet_token,
-                sheet_id,
-                start_row,
-                start_col,
-                [columns],
-                token,
-            )
-
-            next_row = start_row + 1
-            written_rows = 0
-            for batch_index, rows in enumerate(
-                feishu_sheet_import.iter_table_rows(mysql_config, table_name, fetch_size),
-                start=1,
-            ):
+                self.q.put("写入表头...")
                 feishu_sheet_import.write_values(
                     spreadsheet_token,
                     sheet_id,
-                    next_row,
+                    start_row,
                     start_col,
-                    rows,
+                    [columns],
                     token,
                 )
-                next_row += len(rows)
-                written_rows += len(rows)
-                self.q.put(f"批次 {batch_index} 写入 {len(rows)} 行，累计 {written_rows}/{row_count}")
 
-            self.q.put(f"导入完成：已写入表头 1 行，数据 {written_rows} 行")
+                next_row = start_row + 1
+                written_rows = 0
+                for batch_index, rows in enumerate(
+                    feishu_sheet_import.iter_table_rows(mysql_config, table_name, fetch_size),
+                    start=1,
+                ):
+                    feishu_sheet_import.write_values(
+                        spreadsheet_token,
+                        sheet_id,
+                        next_row,
+                        start_col,
+                        rows,
+                        token,
+                    )
+                    next_row += len(rows)
+                    written_rows += len(rows)
+                    self.q.put(f"批次 {batch_index} 写入 {len(rows)} 行，累计 {written_rows}/{row_count}")
+
+                self.q.put(f"导入完成：已写入表头 1 行，数据 {written_rows} 行")
+
+            self.with_feishu_token_retry(run)
         except Exception as e:
             self.q.put("导入飞书表格失败：" + str(e))
             self.q.put(traceback.format_exc())
