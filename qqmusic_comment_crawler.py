@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from datetime import datetime
@@ -21,6 +22,72 @@ from webdriver_manager.chrome import ChromeDriverManager
 DEFAULT_COOKIE_STR = "pgv_pvid=4116664816; fqm_pvqid=e3d37b92-0126-434b-950a-f03e9f71cc89; ts_uid=9447767676; RK=xT4Xdl3l3Q; ptcz=3d049ebebf29050cdc62d9f8f44048cc6ba22070fd74dce746648a6189425aca; fqm_sessionid=da801623-8aa0-4b70-905b-972f95b4837b; pgv_info=ssid=s7889805680; ts_last=y.qq.com/n/ryqq_v2/songDetail/002RPkFp3OOi7c; _qpsvr_localtk=0.22358425058865428; login_type=1; psrf_access_token_expiresAt=1777101393; psrf_qqrefresh_token=215DBC98981FBF0F28F88972F52F3C50; psrf_qqopenid=1C40FEF5D173767EB0DE0E851BEB7DC3; psrf_qqaccess_token=BA509008D9B1CD2EC4F29429159CEEC7; tmeLoginType=2; qqmusic_key=Q_H_L_63k3NV-KXJlqDJ9DolmWUaRbcqLSYYD9t9QcGVjXrur8SJ5X-8M8TlIWVlG74eWYMAmBaZdnzeGn8rzfGg8NYvRuBkz3QDA; qm_keyst=Q_H_L_63k3NV-KXJlqDJ9DolmWUaRbcqLSYYD9t9QcGVjXrur8SJ5X-8M8TlIWVlG74eWYMAmBaZdnzeGn8rzfGg8NYvRuBkz3QDA; euin=oinsoKnA7wolNv**; psrf_qqunionid=A6A3920AF349B38FC596C62C89AB9423; psrf_musickey_createtime=1771917393; music_ignore_pskey=202306271436Hn@vBj; wxunionid=; wxopenid=; uin=3061026379; wxrefresh_token="
 NULL_REPLACE = "未知"
 QQMUSIC_PLATFORM_ID = 1
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+QQMUSIC_HOME_URL = "https://y.qq.com/"
+QQMUSIC_LOGIN_READY_KEYS = ("uin", "qqmusic_key", "qm_keyst")
+
+
+def find_chrome_binary():
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def cookies_to_string(cookies):
+    parts = []
+    for cookie in cookies:
+        name = str(cookie.get("name") or "").strip()
+        value = str(cookie.get("value") or "").strip()
+        if name:
+            parts.append(f"{name}={value}")
+    return "; ".join(parts)
+
+
+def has_qqmusic_login_cookie(cookie_dict):
+    if not cookie_dict.get("uin"):
+        return False
+    return bool(cookie_dict.get("qqmusic_key") or cookie_dict.get("qm_keyst"))
+
+
+def try_open_login_entry(driver, logger=None):
+    if logger is None:
+        logger = print
+
+    selectors = [
+        (By.XPATH, "//a[contains(., '登录')]"),
+        (By.XPATH, "//button[contains(., '登录')]"),
+        (By.CSS_SELECTOR, "a[href*='login']"),
+        (By.CSS_SELECTOR, "button[class*='login']"),
+        (By.CSS_SELECTOR, "[class*='login']"),
+    ]
+
+    for by, selector in selectors:
+        try:
+            elements = driver.find_elements(by, selector)
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                text = (element.text or "").strip()
+                if not element.is_displayed():
+                    continue
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+                time.sleep(0.5)
+                element.click()
+                logger(f"已尝试点击登录入口：{text or selector}")
+                return True
+            except Exception:
+                continue
+
+    logger("未自动找到明确的登录按钮，如页面未弹出登录框，请手动点击页面右上角登录。")
+    return False
 
 
 def load_manual_cookie(driver, cookie_str):
@@ -139,6 +206,9 @@ def extract_like_num(item):
 
 def build_driver():
     chrome_options = Options()
+    chrome_binary = find_chrome_binary()
+    if chrome_binary:
+        chrome_options.binary_location = chrome_binary
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
@@ -146,12 +216,51 @@ def build_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
     )
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options,
-    )
+    # Prefer Selenium Manager first to avoid webdriver_manager cache permission issues.
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+    except Exception:
+        os.environ.setdefault("WDM_LOCAL", "1")
+        os.makedirs(os.path.join(APP_DIR, ".wdm"), exist_ok=True)
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=chrome_options,
+        )
     driver.maximize_window()
     return driver
+
+
+def collect_qqmusic_cookie_via_login(timeout_seconds=180, logger=None):
+    if logger is None:
+        logger = print
+
+    driver = build_driver()
+    try:
+        logger("正在打开 QQ 音乐首页...")
+        driver.get(QQMUSIC_HOME_URL)
+        time.sleep(3)
+        try_open_login_entry(driver, logger=logger)
+        logger("请在打开的浏览器中完成扫码登录，程序会在检测到可用 Cookie 后自动回填。")
+
+        deadline = time.time() + max(int(timeout_seconds), 30)
+        last_report_second = -1
+        while time.time() < deadline:
+            cookies = driver.get_cookies()
+            cookie_dict = {str(item.get("name") or "").strip(): str(item.get("value") or "").strip() for item in cookies}
+            if has_qqmusic_login_cookie(cookie_dict):
+                cookie_str = cookies_to_string(cookies)
+                logger(f"已检测到登录成功，获取到 {len(cookies)} 个 Cookie。")
+                return cookie_str
+
+            remaining = int(deadline - time.time())
+            if remaining % 10 == 0 and remaining != last_report_second:
+                last_report_second = remaining
+                logger(f"等待扫码登录完成... 剩余 {remaining} 秒")
+            time.sleep(1)
+
+        raise TimeoutError(f"等待 QQ 音乐扫码登录超时（{timeout_seconds} 秒）。")
+    finally:
+        driver.quit()
 
 
 def get_qqmusic_comments(song_platform_code, cookie_str=DEFAULT_COOKIE_STR, logger=None):

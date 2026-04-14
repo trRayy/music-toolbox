@@ -67,6 +67,7 @@ TME_PLATFORM_CODES = ("qyin", "kugou", "kuwo")
 DEFAULT_CODE_TO_PLATFORM_ID = {"qyin": 1, "kugou": 2, "kuwo": 3}
 WANGYIYUN_PLATFORM_ID_DEFAULT = 4
 QQMUSIC_DEFAULT_COOKIE_STR = getattr(qqmusic_comment_crawler, "DEFAULT_COOKIE_STR", "")
+QQMUSIC_COOKIE_ENV = "QQMUSIC_COOKIE"
 WANGYIYUN_COOKIE_ENV = getattr(wangyiyun_comment, "DEFAULT_COOKIE_ENV", "NETEASE_COOKIE")
 WANGYIYUN_TARGET_TABLE = getattr(wangyiyun_comment, "DEFAULT_TARGET_TABLE", "t_comment")
 WANGYIYUN_TEST_TABLE = getattr(wangyiyun_comment, "DEFAULT_TEST_TABLE", "t_comment_wangyiyun_test")
@@ -74,6 +75,7 @@ FEISHU_TOKEN_ENV = "FEISHU_USER_ACCESS_TOKEN"
 FEISHU_DEFAULT_SHEET_URL = "https://gx1mlm3tj1l.feishu.cn/sheets/GdpOsM9orhCph3tbWFicv1YJn1g"
 FEISHU_DEFAULT_WORKSHEET_ID = "db7efd"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+QQMUSIC_COOKIE_CACHE_FILE = os.path.join(APP_DIR, "qqmusic_cookie_cache.txt")
 FEISHU_TOKEN_CACHE_FILE = os.path.join(APP_DIR, "feishu_token_cache.json")
 FEISHU_OAUTH_SETTINGS_FILE = os.path.join(APP_DIR, "start_feishu_oauth.ps1")
 FEISHU_OAUTH_ENV_KEYS = ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_REDIRECT_URI")
@@ -83,6 +85,41 @@ FEISHU_OAUTH_ENV_KEYS = ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_REDIRECT_
 def log_print(text_widget: tk.Text, msg: str):
     text_widget.insert("end", msg + "\n")
     text_widget.see("end")
+
+
+def read_text_file_if_exists(path: str) -> str:
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def write_text_file(path: str, content: str):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def get_saved_qqmusic_cookie() -> str:
+    env_cookie = os.getenv(QQMUSIC_COOKIE_ENV, "").strip()
+    if env_cookie:
+        return env_cookie
+
+    cached_cookie = read_text_file_if_exists(QQMUSIC_COOKIE_CACHE_FILE)
+    if cached_cookie:
+        return cached_cookie
+
+    return QQMUSIC_DEFAULT_COOKIE_STR
+
+
+def persist_qqmusic_cookie(cookie: str):
+    cookie = str(cookie or "").strip()
+    if not cookie:
+        return
+    os.environ[QQMUSIC_COOKIE_ENV] = cookie
+    write_text_file(QQMUSIC_COOKIE_CACHE_FILE, cookie)
 
 
 def db_fetch_one(sql, params=()):
@@ -1639,7 +1676,7 @@ class UpdateTabQQMusicComment(ttk.Frame):
         ttk.Entry(form, textvariable=self.qqmusic_code_var, width=34).grid(row=1, column=1, sticky="w", padx=8, pady=(10, 0))
 
         ttk.Label(form, text="Cookie（留空用默认）：").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        self.cookie_var = tk.StringVar(value=QQMUSIC_DEFAULT_COOKIE_STR)
+        self.cookie_var = tk.StringVar(value=get_saved_qqmusic_cookie())
         cookie_entry = ttk.Entry(form, textvariable=self.cookie_var, width=60)
         cookie_entry.grid(row=2, column=1, columnspan=2, sticky="w", padx=8, pady=(10, 0))
         
@@ -1650,6 +1687,8 @@ class UpdateTabQQMusicComment(ttk.Frame):
         self.run_btn.pack(side="left")
 
         ttk.Button(btns, text="刷新歌曲列表", command=self.load_songs).pack(side="left", padx=8)
+        self.login_cookie_btn = ttk.Button(btns, text="扫码登录获取Cookie", command=self.start_login_cookie)
+        self.login_cookie_btn.pack(side="left", padx=8)
         ttk.Button(btns, text="恢复默认Cookie", command=lambda: self.cookie_var.set(QQMUSIC_DEFAULT_COOKIE_STR)).pack(side="left", padx=8)
 
         self.log = tk.Text(self, height=18)
@@ -1667,6 +1706,41 @@ class UpdateTabQQMusicComment(ttk.Frame):
                 break
             log_print(self.log, msg)
         self.after(100, self.flush_log)
+
+    def set_busy(self, busy: bool):
+        state = "disabled" if busy else "normal"
+        self.run_btn.config(state=state)
+        self.login_cookie_btn.config(state=state)
+
+    def apply_cookie(self, cookie: str, source: str):
+        cookie = str(cookie or "").strip()
+        if not cookie:
+            raise ValueError("获取到的 Cookie 为空。")
+        self.cookie_var.set(cookie)
+        persist_qqmusic_cookie(cookie)
+        self.q.put(f"已通过{source}更新 QQ Cookie，长度={len(cookie)}，并写入本地缓存。")
+
+    def start_login_cookie(self):
+        try:
+            ensure_feature_module(qqmusic_comment_crawler, QQMUSIC_IMPORT_ERROR, "QQ音乐评论爬取")
+        except Exception as e:
+            messagebox.showwarning("提示", str(e))
+            return
+
+        self.set_busy(True)
+        self.q.put("准备打开 QQ 音乐登录页面，请稍后扫码。")
+        th = threading.Thread(target=self._login_cookie_worker, daemon=True)
+        th.start()
+
+    def _login_cookie_worker(self):
+        try:
+            cookie = qqmusic_comment_crawler.collect_qqmusic_cookie_via_login(logger=self.q.put)
+            self.after(0, lambda: self.apply_cookie(cookie, "QQ音乐扫码登录"))
+        except Exception as e:
+            self.q.put("自动获取 QQ Cookie 失败：" + str(e))
+            self.q.put(traceback.format_exc())
+        finally:
+            self.after(0, lambda: self.set_busy(False))
 
     def load_songs(self):
         try:
@@ -1700,7 +1774,7 @@ class UpdateTabQQMusicComment(ttk.Frame):
 
     def start_run(self):
         try:
-            ensure_feature_module(wangyiyun_comment, WANGYIYUN_IMPORT_ERROR, "网易云评论爬取")
+            ensure_feature_module(qqmusic_comment_crawler, QQMUSIC_IMPORT_ERROR, "QQ音乐评论爬取")
         except Exception as e:
             messagebox.showwarning("提示", str(e))
             return
@@ -1715,10 +1789,11 @@ class UpdateTabQQMusicComment(ttk.Frame):
             messagebox.showwarning("提示", "请填写QQ音乐ID（song_platform_code）")
             return
 
-        cookie_str = self.cookie_var.get().strip() or QQMUSIC_DEFAULT_COOKIE_STR
+        cookie_str = self.cookie_var.get().strip() or get_saved_qqmusic_cookie()
         song_id = self.song_map[label]
+        persist_qqmusic_cookie(cookie_str)
 
-        self.run_btn.config(state="disabled")
+        self.set_busy(True)
         self.q.put(f"🚀 开始爬取QQ音乐评论：song_id={song_id} QQ音乐ID={qqmusic_code}")
 
         th = threading.Thread(
@@ -1744,7 +1819,7 @@ class UpdateTabQQMusicComment(ttk.Frame):
             self.q.put("❌ 爬取失败：" + str(e))
             self.q.put(traceback.format_exc())
         finally:
-            self.run_btn.config(state="normal")
+            self.after(0, lambda: self.set_busy(False))
 
 
 class UpdateTabWangYiYunComment(ttk.Frame):
@@ -1920,7 +1995,7 @@ class UpdateTabBatch(ttk.Frame):
         ttk.Entry(form, textvariable=self.days_var, width=8).grid(row=1, column=1, sticky="w", pady=(10, 0))
 
         ttk.Label(form, text="QQ Cookie：").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        self.qq_cookie_var = tk.StringVar(value=QQMUSIC_DEFAULT_COOKIE_STR)
+        self.qq_cookie_var = tk.StringVar(value=get_saved_qqmusic_cookie())
         ttk.Entry(form, textvariable=self.qq_cookie_var, width=90).grid(row=2, column=1, columnspan=4, sticky="w", pady=(10, 0))
 
         ttk.Label(form, text="腾讯端 token：").grid(row=3, column=0, sticky="w", pady=(10, 0))
