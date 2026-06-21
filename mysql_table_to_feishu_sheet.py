@@ -15,15 +15,17 @@ except ModuleNotFoundError:  # pragma: no cover - handled at runtime
     pymysql = None
 
 from feishu_oauth_user_token import get_user_access_token_interactively
+from config_loader import get_mysql_config
 
 
 DEFAULT_FETCH_SIZE = 500
-DEFAULT_DB_HOST = "localhost"
-DEFAULT_DB_PORT = 3306
-DEFAULT_DB_USER = "root"
-DEFAULT_DB_PASSWORD = "root"
-DEFAULT_DB_NAME = "t_music_data"
-DEFAULT_DB_CHARSET = "utf8mb4"
+DEFAULT_DB_CONFIG = get_mysql_config()
+DEFAULT_DB_HOST = DEFAULT_DB_CONFIG["host"]
+DEFAULT_DB_PORT = DEFAULT_DB_CONFIG["port"]
+DEFAULT_DB_USER = DEFAULT_DB_CONFIG["user"]
+DEFAULT_DB_PASSWORD = DEFAULT_DB_CONFIG["password"]
+DEFAULT_DB_NAME = DEFAULT_DB_CONFIG["db"]
+DEFAULT_DB_CHARSET = DEFAULT_DB_CONFIG["charset"]
 
 SHEETS_QUERY_URL = "https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/{spreadsheet_token}/sheets/query"
 SHEETS_WRITE_URL = "https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values"

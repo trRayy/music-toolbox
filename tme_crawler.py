@@ -1,4 +1,4 @@
-import requests
+﻿import requests
 import pandas as pd
 import pymysql
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ import urllib.parse
 import requests
 import warnings
 import pandas as pd
+from config_loader import get_setting
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 class FriendlyTMEError(RuntimeError):
@@ -27,10 +28,10 @@ def build_trend_url(tme_song_id: str, start_date: str, end_date: str) -> str:
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
     'Referer': 'https://y.tencentmusic.com/',
-    'tme-header-token': 'eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJ0bWUiLCJpYXQiOjE3NzMxMDQ2NDcsInN1YiI6InBhc3NwcG9ydCIsInBob25lIjoiKzg2KjE4NTE2MDYwNzM5IiwibG9naW5UeXBlIjoyLCJtaWQiOjQ3OTcwNjMsInRlbmFudCI6Im11c2ljaWFuIiwibG9naW5Tb3VyY2UiOm51bGwsImV4cCI6MTc3NTY5NjY0N30.WasX7U1WWxwvdH60bgEScsq444pnjautyrj3Z7MLIfY',  # 使用你提供的有效 token
+    'tme-header-token': get_setting('TME_HEADER_TOKEN', 'YOUR_TME_HEADER_TOKEN'),
     'tme-header-feferer': '/',
-    'tme-header-herf': 'https://y.tencentmusic.com/#/user/organdata/works/detail/15181859',
-    'tme-header-trace': 'a4v7rbhk3j0jer6t8lj01ibqh6ksn63l',
+    'tme-header-herf': 'https://y.tencentmusic.com/#/user/organdata/works/detail/YOUR_SONG_ID',
+    'tme-header-trace': 'trace_placeholder',
     'tme-source-platform': '0',
     'Content-Type': 'application/json;charset=utf-8'
 }

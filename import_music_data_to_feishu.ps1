@@ -4,19 +4,19 @@ param(
 
     [string]$StartCell = "A1",
 
-    [string]$SheetUrl = "https://gx1mlm3tj1l.feishu.cn/sheets/GdpOsM9orhCph3tbWFicv1YJn1g",
+    [string]$SheetUrl = "https://example.feishu.cn/sheets/YOUR_SPREADSHEET_TOKEN",
 
-    [string]$WorksheetId = "db7efd",
+    [string]$WorksheetId = "YOUR_WORKSHEET_ID",
 
     [string]$HostName = "localhost",
 
     [int]$Port = 3306,
 
-    [string]$UserName = "root",
+    [string]$UserName = "music_user",
 
-    [string]$Password = "root",
+    [string]$Password = "",
 
-    [string]$Database = "t_music_data",
+    [string]$Database = "music_db",
 
     [int]$FetchSize = 500
 )

@@ -1,29 +1,31 @@
-import tkinter as tk
-import subprocess
 import os
+import subprocess
+import tkinter as tk
 
-# ===== 配置区（只改这里）=====
-STREAMLIT_EXE = r"C:\Users\User\anaconda3\Scripts\streamlit.exe"
-APP_SCRIPT = r"C:\Users\User\Desktop\auto\music_dashboard63.py"
-# =============================
+from config_loader import get_setting
+
+
+STREAMLIT_EXE = get_setting("STREAMLIT_EXE", "streamlit")
+APP_SCRIPT = get_setting("DASHBOARD_SCRIPT", os.path.join(os.path.dirname(__file__), "music_dashboard63.py"))
+
 
 def run_streamlit():
-    cmd = f'"{STREAMLIT_EXE}" run "{APP_SCRIPT}"'
-    subprocess.Popen(cmd, shell=True)
+    subprocess.Popen([STREAMLIT_EXE, "run", APP_SCRIPT])
+
 
 root = tk.Tk()
-root.title("音乐数据看板启动器")
-root.geometry("300x150")
+root.title("Music Dashboard Launcher")
+root.geometry("320x160")
 
-label = tk.Label(root, text="点击按钮启动 Streamlit 看板")
+label = tk.Label(root, text="Click the button to start the Streamlit dashboard")
 label.pack(pady=20)
 
 btn = tk.Button(
     root,
-    text="🚀 启动音乐数据看板",
+    text="Start dashboard",
     command=run_streamlit,
     height=2,
-    width=20
+    width=20,
 )
 btn.pack()
 

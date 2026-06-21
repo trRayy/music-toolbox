@@ -1,20 +1,11 @@
-import tkinter as tk
+﻿import tkinter as tk
 from tkinter import ttk, messagebox
 import pymysql
 import traceback
+from config_loader import get_mysql_config
 
 # ===== MySQL 配置（加超时，避免卡死）=====
-MYSQL_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': 'root',
-    'db': 't_music_data',
-    'charset': 'utf8mb4',
-    'connect_timeout': 5,   # 关键：连接最多等 5 秒
-    'read_timeout': 10,
-    'write_timeout': 10,
-}
+MYSQL_CONFIG = get_mysql_config()
 
 DEFAULT_LIMIT = 200
 

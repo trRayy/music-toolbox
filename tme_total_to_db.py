@@ -4,30 +4,15 @@ import time
 from datetime import datetime, timezone, timedelta
 import requests
 import pymysql
+from config_loader import get_mysql_config, get_setting
 
 
 # ===================== 固定 token（你要求：不参数化） =====================
-TME_HEADER_TOKEN = (
-    "eyJhbGciOiJIUzI1NiJ9."
-    "eyJqdGkiOiJ0bWUiLCJpYXQiOjE3Njg3OTI0ODksInN1YiI6InBhc3NwcG9ydCIs"
-    "ImxvZ2luVHlwZSI6NSwibWlkIjo0Nzk3MDYzLCJsb2dpblNvdXJjZSI6bnVsbCwid"
-    "GVuYW50IjoibXVzaWNpYW4iLCJleHAiOjE3NzEzODQ0ODl9."
-    "3ylupF8NP2rdAc1ACG2_Ayc_YEEBTC2rgM73gNYFA1k"
-)
+TME_HEADER_TOKEN = get_setting("TME_HEADER_TOKEN", "YOUR_TME_HEADER_TOKEN")
 
 
 # ===================== MySQL 配置（按你环境改） =====================
-MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": "root",
-    "db": "t_music_data",
-    "charset": "utf8mb4",
-    "connect_timeout": 5,
-    "read_timeout": 10,
-    "write_timeout": 10,
-}
+MYSQL_CONFIG = get_mysql_config()
 
 
 # ===================== 腾讯音乐 total API =====================

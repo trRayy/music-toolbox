@@ -17,9 +17,13 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
+from config_loader import get_setting
 
 
-DEFAULT_COOKIE_STR = "pgv_pvid=4116664816; fqm_pvqid=e3d37b92-0126-434b-950a-f03e9f71cc89; ts_uid=9447767676; RK=xT4Xdl3l3Q; ptcz=3d049ebebf29050cdc62d9f8f44048cc6ba22070fd74dce746648a6189425aca; fqm_sessionid=da801623-8aa0-4b70-905b-972f95b4837b; pgv_info=ssid=s7889805680; ts_last=y.qq.com/n/ryqq_v2/songDetail/002RPkFp3OOi7c; _qpsvr_localtk=0.22358425058865428; login_type=1; psrf_access_token_expiresAt=1777101393; psrf_qqrefresh_token=215DBC98981FBF0F28F88972F52F3C50; psrf_qqopenid=1C40FEF5D173767EB0DE0E851BEB7DC3; psrf_qqaccess_token=BA509008D9B1CD2EC4F29429159CEEC7; tmeLoginType=2; qqmusic_key=Q_H_L_63k3NV-KXJlqDJ9DolmWUaRbcqLSYYD9t9QcGVjXrur8SJ5X-8M8TlIWVlG74eWYMAmBaZdnzeGn8rzfGg8NYvRuBkz3QDA; qm_keyst=Q_H_L_63k3NV-KXJlqDJ9DolmWUaRbcqLSYYD9t9QcGVjXrur8SJ5X-8M8TlIWVlG74eWYMAmBaZdnzeGn8rzfGg8NYvRuBkz3QDA; euin=oinsoKnA7wolNv**; psrf_qqunionid=A6A3920AF349B38FC596C62C89AB9423; psrf_musickey_createtime=1771917393; music_ignore_pskey=202306271436Hn@vBj; wxunionid=; wxopenid=; uin=3061026379; wxrefresh_token="
+DEFAULT_COOKIE_STR = get_setting(
+    "QQMUSIC_COOKIE",
+    "uin=YOUR_QQ_UIN; qqmusic_key=YOUR_QQMUSIC_KEY; qm_keyst=YOUR_QM_KEYST",
+)
 NULL_REPLACE = "未知"
 QQMUSIC_PLATFORM_ID = 1
 APP_DIR = os.path.dirname(os.path.abspath(__file__))

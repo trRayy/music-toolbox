@@ -17,6 +17,7 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 import mysql_table_to_feishu_sheet as feishu_sheet_import
 import feishu_oauth_user_token as feishu_oauth
+from config_loader import get_int_setting, get_mysql_config, get_setting
 
 # ========= 导入模块 =========
 def optional_import(module_name: str):
@@ -32,35 +33,25 @@ qishui_ocr, QISHUI_IMPORT_ERROR = optional_import("qishui_ocr")
 wangyiyun_comment, WANGYIYUN_IMPORT_ERROR = optional_import("wangyiyun_comment")
 
 # ========= 配置 =========
-DASHBOARD_SCRIPT = r"C:\Users\User\Desktop\auto\music_dashboard63.py"
-DASHBOARD_PORT = 8513
+DASHBOARD_SCRIPT = get_setting("DASHBOARD_SCRIPT", "music_dashboard63.py")
+DASHBOARD_PORT = get_int_setting("DASHBOARD_PORT", 8513)
 
-MYSQL_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': 'root',
-    'db': 't_music_data',
-    'charset': 'utf8mb4',
-    'connect_timeout': 5,
-    'read_timeout': 10,
-    'write_timeout': 10,
-}
+MYSQL_CONFIG = get_mysql_config()
 
 HEADERS_TME = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0',
     'Referer': 'https://y.tencentmusic.com/',
-    'tme-header-token': 'eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiJ0bWUiLCJpYXQiOjE3NzMxMDQ2NDcsInN1YiI6InBhc3NwcG9ydCIsInBob25lIjoiKzg2KjE4NTE2MDYwNzM5IiwibG9naW5UeXBlIjoyLCJtaWQiOjQ3OTcwNjMsInRlbmFudCI6Im11c2ljaWFuIiwibG9naW5Tb3VyY2UiOm51bGwsImV4cCI6MTc3NTY5NjY0N30.WasX7U1WWxwvdH60bgEScsq444pnjautyrj3Z7MLIfY',
+    'tme-header-token': get_setting('TME_HEADER_TOKEN', 'YOUR_TME_HEADER_TOKEN'),
     'tme-header-feferer': '/',
-    'tme-header-herf': 'https://y.tencentmusic.com/#/user/organdata/works/detail/15181859',
-    'tme-header-trace': '7685rupgeh0obfrm4lrcasqil88j0u6g',
+    'tme-header-herf': 'https://y.tencentmusic.com/#/user/organdata/works/detail/YOUR_SONG_ID',
+    'tme-header-trace': 'trace_placeholder',
     'tme-source-platform': '0',
     'Content-Type': 'application/json;charset=utf-8'
 }
 
 QISHUI_PLATFORM_ID_DEFAULT = 5
 QISHUI_OUT_DIR_DEFAULT = "dy_music_ocr_out"
-TESSERACT_CMD_DEFAULT = r"C:\Users\User\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
+TESSERACT_CMD_DEFAULT = get_setting("TESSERACT_CMD", r"C:\path\to\Tesseract-OCR\tesseract.exe")
 WAIT_SEC_DEFAULT = 6
 
 TME_PLATFORM_CODES = ("qyin", "kugou", "kuwo")
@@ -72,8 +63,11 @@ WANGYIYUN_COOKIE_ENV = getattr(wangyiyun_comment, "DEFAULT_COOKIE_ENV", "NETEASE
 WANGYIYUN_TARGET_TABLE = getattr(wangyiyun_comment, "DEFAULT_TARGET_TABLE", "t_comment")
 WANGYIYUN_TEST_TABLE = getattr(wangyiyun_comment, "DEFAULT_TEST_TABLE", "t_comment_wangyiyun_test")
 FEISHU_TOKEN_ENV = "FEISHU_USER_ACCESS_TOKEN"
-FEISHU_DEFAULT_SHEET_URL = "https://gx1mlm3tj1l.feishu.cn/sheets/GdpOsM9orhCph3tbWFicv1YJn1g"
-FEISHU_DEFAULT_WORKSHEET_ID = "db7efd"
+FEISHU_DEFAULT_SHEET_URL = get_setting(
+    "FEISHU_DEFAULT_SHEET_URL",
+    "https://example.feishu.cn/sheets/YOUR_SPREADSHEET_TOKEN",
+)
+FEISHU_DEFAULT_WORKSHEET_ID = get_setting("FEISHU_DEFAULT_WORKSHEET_ID", "YOUR_WORKSHEET_ID")
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 QQMUSIC_COOKIE_CACHE_FILE = os.path.join(APP_DIR, "qqmusic_cookie_cache.txt")
 FEISHU_TOKEN_CACHE_FILE = os.path.join(APP_DIR, "feishu_token_cache.json")

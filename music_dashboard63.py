@@ -19,19 +19,12 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import matplotlib.font_manager as fm
 from collections import Counter
+from config_loader import get_mysql_config
 
 warnings.filterwarnings("ignore")
 
 # ===================== 0) 基础配置 =====================
-MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": os.getenv("MYSQL_PASSWORD", "root"),
-    "db": "t_music_data",
-    "charset": "utf8mb4",
-    "autocommit": True,
-}
+MYSQL_CONFIG = get_mysql_config(autocommit=True)
 
 DEFAULT_SINGER_NAME = "魏子越"
 DEFAULT_SONG_NAME = "《归来》"

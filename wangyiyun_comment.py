@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pymysql
+from config_loader import get_mysql_config
 
 
 DEFAULT_COOKIE_ENV = "NETEASE_COOKIE"
@@ -285,6 +286,7 @@ def crawl_wangyiyun_comments_to_db(
 def parse_args(argv: list[str] | None = None):
     import argparse
 
+    default_db_config = get_mysql_config()
     parser = argparse.ArgumentParser(description="抓取网易云评论并写入MySQL")
     parser.add_argument("--song", required=True, help="网易云 song_id 或完整歌曲 URL")
     parser.add_argument("--song-id", type=int, required=True, help="本地数据库中的 song_id")
@@ -296,12 +298,12 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--sort", choices=("asc", "desc"), default="desc")
     parser.add_argument("--table-name", default=DEFAULT_TARGET_TABLE)
     parser.add_argument("--platform-id", type=int, default=DEFAULT_PLATFORM_ID)
-    parser.add_argument("--host", default="localhost")
-    parser.add_argument("--port", type=int, default=3306)
-    parser.add_argument("--user", default="root")
-    parser.add_argument("--password", default="root")
-    parser.add_argument("--db", default="t_music_data")
-    parser.add_argument("--charset", default="utf8mb4")
+    parser.add_argument("--host", default=default_db_config["host"])
+    parser.add_argument("--port", type=int, default=default_db_config["port"])
+    parser.add_argument("--user", default=default_db_config["user"])
+    parser.add_argument("--password", default=default_db_config["password"])
+    parser.add_argument("--db", default=default_db_config["db"])
+    parser.add_argument("--charset", default=default_db_config["charset"])
     return parser.parse_args(argv)
 
 

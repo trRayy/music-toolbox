@@ -9,29 +9,20 @@ import pytesseract
 from dataclasses import dataclass
 from datetime import datetime
 import pymysql
+from config_loader import get_int_setting, get_mysql_config, get_setting
 
 from DrissionPage import ChromiumPage
 
 # ===================== 可配置默认值（不传参就用这些） =====================
-DEFAULT_OUT_DIR = "dy_music_ocr_out"
-TESSERACT_CMD = r"C:\Users\User\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
-WAIT_SEC = 6
+DEFAULT_OUT_DIR = get_setting("QISHUI_OUT_DIR", "dy_music_ocr_out")
+TESSERACT_CMD = get_setting("TESSERACT_CMD", r"C:\path\to\Tesseract-OCR\tesseract.exe")
+WAIT_SEC = get_int_setting("QISHUI_WAIT_SEC", 6)
 
 # 写库默认 platform_id（你说汽水平台用 5）
 DEFAULT_PLATFORM_ID = 5
 
 # ✅ MySQL 配置（按你环境改）
-MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": "root",
-    "db": "t_music_data",
-    "charset": "utf8mb4",
-    "connect_timeout": 5,
-    "read_timeout": 10,
-    "write_timeout": 10,
-}
+MYSQL_CONFIG = get_mysql_config()
 
 # ===================== URL 构造（参数化 song_platform_code） =====================
 def build_qishui_url(song_platform_code: str) -> str:

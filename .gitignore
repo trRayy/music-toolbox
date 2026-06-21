@@ -1,0 +1,46 @@
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+config.py
+*secret*
+*credential*
+*token*
+*cookie*
+cookies.txt
+secret.json
+credential*.json
+
+# Runtime output and caches
+__pycache__/
+*.py[cod]
+*.log
+*.pid
+*.tmp
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.parquet
+*.pkl
+*.pickle
+*.jsonl
+
+# Local export/debug artifacts
+dy_music_ocr_out/
+exports/
+reports/
+screenshots/
+qqmusic_cookie_cache.txt
+feishu_token_cache.json
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
